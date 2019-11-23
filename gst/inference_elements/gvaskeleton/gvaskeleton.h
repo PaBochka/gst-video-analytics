@@ -19,7 +19,7 @@ typedef struct HumanPoseEstimator HumanPoseEstimator;
 
 typedef enum { GVA_SKELETON_OK, GVA_SKELETON_ERROR } GvaSkeletonStatus;
 
-GvaSkeletonStatus hpe_initialization(HumanPoseEstimator *, char *, char *);
+HumanPoseEstimator *hpe_initialization(char *, char *);
 GvaSkeletonStatus hpe_release(HumanPoseEstimator *);
 GvaSkeletonStatus hpe_to_estimate(HumanPoseEstimator *, GstBuffer *, GstVideoInfo *);
 

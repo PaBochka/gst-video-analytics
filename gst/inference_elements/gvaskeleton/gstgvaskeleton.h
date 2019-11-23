@@ -30,6 +30,7 @@ typedef struct _GstGvaSkeleton {
 
     gchar *model_path;
     gchar *device;
+    gboolean is_initialized;
 
     HumanPoseEstimator *hpe_object;
 

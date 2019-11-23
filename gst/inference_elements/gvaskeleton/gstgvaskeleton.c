@@ -50,7 +50,7 @@ void gst_gva_skeleton_class_init(GstGvaSkeletonClass *klass) {
     gst_element_class_set_static_metadata(element_class, ELEMENT_LONG_NAME, "Video", ELEMENT_DESCRIPTION,
                                           "Intel Corporation");
     g_object_class_install_property(gobject_class, PROP_MODEL_PATH,
-                                    g_param_spec_string("model path",         // name
+                                    g_param_spec_string("model_path",         // name
                                                         "model path",         // nickname
                                                         "Path to model path", // description
                                                         "",                   // default
@@ -60,7 +60,7 @@ void gst_gva_skeleton_class_init(GstGvaSkeletonClass *klass) {
                                     g_param_spec_string("device",        // name
                                                         "device",        // nickname
                                                         "infer device",  // description
-                                                        "",              // default
+                                                        "CPU",           // default
                                                         G_PARAM_WRITABLE // flags
                                                         ));
     base_transform_class->set_caps = GST_DEBUG_FUNCPTR(gst_gva_skeleton_set_caps);
@@ -72,10 +72,8 @@ void gst_gva_skeleton_class_init(GstGvaSkeletonClass *klass) {
 
 void gst_gva_skeleton_init(GstGvaSkeleton *skeleton) {
     GST_INFO_OBJECT(skeleton, "Initializing plugin");
-    skeleton->hpe_object = NULL;
-    GvaSkeletonStatus s = hpe_initialization(skeleton->hpe_object, skeleton->model_path, "CPU");
-    if (s == GVA_SKELETON_ERROR)
-        g_error("Upppsss... Human pose estimator has not happend.");
+
+    skeleton->is_initialized = FALSE;
 }
 
 void gst_gva_skeleton_set_property(GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec) {
@@ -171,6 +169,14 @@ GstFlowReturn gst_gva_skeleton_transform_ip(GstBaseTransform *trans, GstBuffer *
     GstGvaSkeleton *skeleton = GST_GVA_SKELETON(trans);
 
     GST_DEBUG_OBJECT(skeleton, "transform_ip");
+    // TODO: get rid of this flag (may be move it to start)
+    if (!skeleton->is_initialized) {
+        skeleton->hpe_object = hpe_initialization(skeleton->model_path, "CPU");
+        if (!skeleton->hpe_object)
+            g_error("Upppsss... Human pose estimator has not happend.");
+        skeleton->is_initialized = TRUE;
+    }
+
     if (!gst_pad_is_linked(GST_BASE_TRANSFORM_SRC_PAD(trans))) {
         return GST_BASE_TRANSFORM_FLOW_DROPPED;
     }
@@ -185,6 +191,12 @@ GstFlowReturn gst_gva_skeleton_transform_ip(GstBaseTransform *trans, GstBuffer *
 gboolean gst_gva_skeleton_start(GstBaseTransform *base) {
     GstGvaSkeleton *skeleton = GST_GVA_SKELETON(base);
     GST_INFO_OBJECT(skeleton, "Start");
+
+    if (skeleton->model_path == NULL) {
+        g_error("'model_path' is set to null");
+    } else if (!g_file_test(skeleton->model_path, G_FILE_TEST_EXISTS)) {
+        g_error("path %s set in 'model_path' does not exist", skeleton->model_path);
+    }
 
     GST_INFO_OBJECT(skeleton, "Start is successfull");
     return TRUE;

@@ -170,12 +170,6 @@ GstFlowReturn gst_gva_skeleton_transform_ip(GstBaseTransform *trans, GstBuffer *
 
     GST_DEBUG_OBJECT(skeleton, "transform_ip");
     // TODO: get rid of this flag (may be move it to start)
-    if (!skeleton->is_initialized) {
-        skeleton->hpe_object = hpe_initialization(skeleton->model_path, "CPU");
-        if (!skeleton->hpe_object)
-            g_error("Upppsss... Human pose estimator has not happend.");
-        skeleton->is_initialized = TRUE;
-    }
 
     if (!gst_pad_is_linked(GST_BASE_TRANSFORM_SRC_PAD(trans))) {
         return GST_BASE_TRANSFORM_FLOW_DROPPED;
@@ -191,6 +185,13 @@ GstFlowReturn gst_gva_skeleton_transform_ip(GstBaseTransform *trans, GstBuffer *
 gboolean gst_gva_skeleton_start(GstBaseTransform *base) {
     GstGvaSkeleton *skeleton = GST_GVA_SKELETON(base);
     GST_INFO_OBJECT(skeleton, "Start");
+
+    if (!skeleton->is_initialized) {
+        skeleton->hpe_object = hpe_initialization(skeleton->model_path, "CPU");
+        if (!skeleton->hpe_object)
+            g_error("Upppsss... Human pose estimator has not happend.");
+        skeleton->is_initialized = TRUE;
+    }
 
     if (skeleton->model_path == NULL) {
         g_error("'model_path' is set to null");

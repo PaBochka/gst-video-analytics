@@ -56,16 +56,46 @@ int Fourcc2OpenCVType(int fourcc) {
     return 0;
 }
 
-GvaSkeletonStatus attach_poses_to_buffer(const std::vector<HumanPose> &poses, GstBuffer *buf) {
-    try {
-        // TODO: postproc
+// void convertPoses2Array(const std::vector<HumanPose> &poses, float *data, size_t kp_num) {
+//     size_t i = 0;
+//     for (const auto &pose : poses) {
+//         for (const auto &keypoint : pose.keypoints) {
+//             if (i >= kp_num) {
+//                 std::runtime_error("Number of keypoints bigger then data's size");
+//             }
+//             data[i++] = keypoint.x;
+//             data[i++] = keypoint.y;
+//         }
+//     }
+// }
+// void copy_buffer_to_structure(GstStructure *structure, const void *buffer, int size) {
+//     ITT_TASK(__FUNCTION__);
+//     GVariant *v = g_variant_new_fixed_array(G_VARIANT_TYPE_BYTE, buffer, size, 1);
+//     gsize n_elem;
+//     gst_structure_set(structure, "data_buffer", G_TYPE_VARIANT, v, "data", G_TYPE_POINTER,
+//                       g_variant_get_fixed_array(v, &n_elem, 1), NULL);
+// }
 
-        return GVA_SKELETON_OK;
-    } catch (const std::exception &e) {
-        GVA_ERROR(e.what());
-    }
-    return GVA_SKELETON_ERROR;
-}
+// GvaSkeletonStatus attach_poses_to_buffer(const std::vector<HumanPose> &poses, GstBuffer *buf) {
+//     try {
+//         size_t kp_num = 0;
+//         for (const auto &pose : poses)
+//             kp_num += pose.keypoints.size() * 2;
+
+//         float *data = new float[kp_num];
+//         convertPoses2Array(poses, data, kp_num);
+
+//         GstStructure *hp_struct;
+//         gst_structure_new_empty(hp_struct, "human_poses_keypoints");
+
+//         delete[] data;
+//         return GVA_SKELETON_OK;
+//     } catch (const std::exception &e) {
+//         GVA_ERROR(e.what());
+//     }
+//     return GVA_SKELETON_ERROR;
+// }
+
 GvaSkeletonStatus hpe_to_estimate(HumanPoseEstimator *hpe_obj, GstBuffer *buf, GstVideoInfo *info) {
     try {
         InferenceBackend::Image image;
@@ -86,8 +116,10 @@ GvaSkeletonStatus hpe_to_estimate(HumanPoseEstimator *hpe_obj, GstBuffer *buf, G
 
         std::vector<HumanPose> poses = hpe_obj->estimate(mat);
 
-        if (attach_poses_to_buffer(poses, buf) == GVA_SKELETON_ERROR)
-            throw std::runtime_error("Uppsss... Postproc has not happend.");
+        
+
+        // if (attach_poses_to_buffer(poses, buf) == GVA_SKELETON_ERROR)
+        //     throw std::runtime_error("Uppsss... Postproc has not happend.");
 
         // TODO: move it to gvawatermark and return const for mat
         renderHumanPose(poses, mat);

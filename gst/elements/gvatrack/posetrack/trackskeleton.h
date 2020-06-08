@@ -39,5 +39,7 @@ class Tracker : public ITracker {
     cv::Point2f CenterGravity(const GVA::Tensor &tensor);
     void AppendObject(std::vector<GVA::Tensor> &tensors);
     void DropObject(const std::vector<GVA::Tensor> &tensors, std::vector<int> &unique_id_vec);
+    void MatchIdForTensors(std::vector<std::vector<std::pair<float, int>>> matrix_distance,
+                           std::vector<GVA::Tensor> tensors);
 };
 } // namespace skeletontracker

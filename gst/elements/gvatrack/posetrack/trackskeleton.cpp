@@ -20,7 +20,6 @@ ITracker *Tracker::Create(const GstVideoInfo *video_info) {
 
 void Tracker::track(GstBuffer *buffer) {
     GVA::VideoFrame frame(buffer);
-    // g_print("*\n");
     if (poses.empty()) {
         for (auto &tensor : frame.tensors()) {
             if (tensor.is_human_pose()) {
@@ -30,56 +29,94 @@ void Tracker::track(GstBuffer *buffer) {
             }
         }
     } else {
-        std::multimap<float, GVA::Tensor> matches;
+        std::vector<std::pair<float, int>> matches;
+        std::vector<std::vector<std::pair<float, int>>> matrix_distance;
         for (auto &tensor : frame.tensors()) {
             if (tensor.is_human_pose())
                 for (auto &pose : poses) {
                     // matches.insert({CosDistance(CenterGravity(tensor), CenterGravity(pose)), pose});
-                    matches.insert({Distance(tensor, pose), pose});
+                    matches.push_back({Distance(tensor, pose), pose.get_int("object_id")});
                 }
-            // g_print("#\n");
-            // for (const auto &match : matches) {
-            //     std::cout << "nose_tensor " << std::to_string(tensor.get_double("nose_x")) << " tensor id "
-            //               << std::to_string(match.second.get_int("object_id"))
-            //               << " distance " + std::to_string(match.first) + " nose " +
-            //                      std::to_string(match.second.get_double("nose_x"))
-            //               << std::endl;
+            matrix_distance.push_back(matches);
+
+            // if (matches.begin()->first < threshold) {
+            //     tensor.set_int("object_id", matches.begin()->second.get_int("object_id"));
+            // } else {
+            //     tensor.set_int("object_id", ++object_id);
             // }
-            // g_print("#\n");
-            if (matches.begin()->first < threshold) {
-                tensor.set_int("object_id", matches.begin()->second.get_int("object_id"));
-            } else {
-                tensor.set_int("object_id", ++object_id);
-            }
-            // unique_id.push_back(tensor.get_int("object_id"));
+
             matches.clear();
         }
-
-        if (frame.tensors().size() < poses.size()) {
-            DropObject(frame.tensors(), unique_id_vec);
-        } else if (frame.tensors().size() >= poses.size())
-            for (auto &tensor_with_unique_id : frame.tensors()) {
-                int unique_id = 0;
-                for (auto &tensor : frame.tensors()) {
-                    if (tensor_with_unique_id.get_int("object_id") == tensor.get_int("object_id"))
-                        unique_id++;
+        std::vector<int> vec_id;
+        auto max_id = *std::min_element(
+            matrix_distance[0].cbegin(), matrix_distance[0].cend(),
+            [](const std::pair<float, int> &lhs, const std::pair<float, int> &rhs) { return lhs.second < rhs.second; });
+        for (int i = 0; i < matrix_distance.size(); ++i) {
+            auto minimum = matrix_distance[0][0];
+            int min_col_index = 0;
+            int min_row_index = i;
+            for (int j = 0; j < matrix_distance[i].size(); ++j) {
+                if (minimum > matrix_distance[i][j]) {
+                    minimum = matrix_distance[i][j];
+                    min_col_index = j;
                 }
-                if (unique_id > 1) {
-                    int new_id = *std::max_element(unique_id_vec.begin(), unique_id_vec.end()) + 1;
-                    tensor_with_unique_id.set_int("object_id", new_id);
-                    unique_id_vec.push_back(new_id);
-                }
+                matrix_distance[i][j].first *= 100000;
             }
+            for (int row = i; row < matrix_distance.size(); ++row) {
+                if (minimum > matrix_distance[row][min_col_index]) {
+                    minimum = matrix_distance[row][min_col_index];
+                    min_row_index = row;
+                }
+                matrix_distance[row][min_col_index].first *= 100000;
+            }
+            auto it = std::find(vec_id.begin(), vec_id.end(), matrix_distance[min_row_index][min_col_index].second);
+            if (it != vec_id.end())
+                frame.tensors()[min_row_index].set_int("object_id", ++max_id.second);
+            else
+                frame.tensors()[min_row_index].set_int("object_id",
+                                                       matrix_distance[min_row_index][min_col_index].second);
+            vec_id.push_back(matrix_distance[min_row_index][min_col_index].second);
+        }
     }
-    // std::cout << "vector size " << unique_id_vec.size() << " max id "
-    //           << *std::max_element(unique_id_vec.begin(), unique_id_vec.end()) << std::endl;
     poses.clear();
     for (auto &tensor : frame.tensors()) {
         if (tensor.is_human_pose()) {
             poses.push_back(gst_structure_copy(tensor.gst_structure()));
         }
     }
-    // g_print("*\n");
+}
+
+void Tracker::MatchIdForTensors(std::vector<std::vector<std::pair<float, int>>> matrix_distance,
+                                std::vector<GVA::Tensor> tensors) {
+    std::vector<int> vec_id;
+    auto max_id = *std::min_element(
+        matrix_distance[0].cbegin(), matrix_distance[0].cend(),
+        [](const std::pair<float, int> &lhs, const std::pair<float, int> &rhs) { return lhs.second < rhs.second; });
+    for (int i = 0; i < matrix_distance.size(); ++i) {
+        auto minimum = matrix_distance[0][0];
+        int min_col_index = 0;
+        int min_row_index = i;
+        for (int j = 0; j < matrix_distance[i].size(); ++j) {
+            if (minimum > matrix_distance[i][j]) {
+                minimum = matrix_distance[i][j];
+                min_col_index = j;
+            }
+            matrix_distance[i][j].first *= 100000;
+        }
+        for (int row = i; row < matrix_distance.size(); ++row) {
+            if (minimum > matrix_distance[row][min_col_index]) {
+                minimum = matrix_distance[row][min_col_index];
+                min_row_index = row;
+            }
+            matrix_distance[row][min_col_index].first *= 100000;
+        }
+        auto it = std::find(vec_id.begin(), vec_id.end(), matrix_distance[min_row_index][min_col_index].second);
+        if (it != vec_id.end())
+            tensors[min_row_index].set_int("object_id", ++max_id.second);
+        else
+            tensors[min_row_index].set_int("object_id", matrix_distance[min_row_index][min_col_index].second);
+        vec_id.push_back(matrix_distance[min_row_index][min_col_index].second);
+    }
 }
 
 void Tracker::AppendObject(std::vector<GVA::Tensor> &tensors) {

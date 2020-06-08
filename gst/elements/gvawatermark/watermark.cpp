@@ -12,7 +12,7 @@
 #include "video_frame.h"
 #include <gst/allocators/gstdmabuf.h>
 #include <opencv2/opencv.hpp>
-
+static size_t index_for_images = 0;
 static const std::vector<cv::Scalar> color_table_C3 = {
     cv::Scalar(255, 0, 0),   cv::Scalar(0, 255, 0),   cv::Scalar(0, 0, 255),   cv::Scalar(255, 255, 0),
     cv::Scalar(0, 255, 255), cv::Scalar(255, 0, 255), cv::Scalar(255, 170, 0), cv::Scalar(255, 0, 170),
@@ -110,10 +110,24 @@ void render_human_pose(const GVA::VideoFrame &video_frame, cv::Mat &mat, int for
                        4, index2color(i++, format), -1);
             cv::circle(mat, cv::Point(human_pose_tensor.get_double("l_ear_x"), human_pose_tensor.get_double("l_ear_y")),
                        4, index2color(i++, format), -1);
-            cv::putText(
-                mat, std::to_string(human_pose_tensor.get_int("object_id")),
-                cv::Point(human_pose_tensor.get_double("l_ear_x"), human_pose_tensor.get_double("l_ear_y") + 20),
-                cv::FONT_HERSHEY_TRIPLEX, 1, index2color(i++, format), 1);
+
+            cv::Point id_position;
+            if (human_pose_tensor.get_double("l_ear_x") > 0 && human_pose_tensor.get_double("l_ear_y") > 0) {
+                id_position =
+                    cv::Point(human_pose_tensor.get_double("l_ear_x"), human_pose_tensor.get_double("l_ear_y") + 30);
+            } else if (human_pose_tensor.get_double("r_ear_x") > 0 && human_pose_tensor.get_double("r_ear_y") > 0) {
+                id_position =
+                    cv::Point(human_pose_tensor.get_double("r_ear_x"), human_pose_tensor.get_double("r_ear_y") + 30);
+            } else if (human_pose_tensor.get_double("l_eye_x") > 0 && human_pose_tensor.get_double("l_eye_y") > 0) {
+                id_position =
+                    cv::Point(human_pose_tensor.get_double("l_eye_x"), human_pose_tensor.get_double("l_eye_y") + 30);
+            } else if (human_pose_tensor.get_double("r_eye_x") > 0 && human_pose_tensor.get_double("r_eye_y") > 0) {
+                id_position =
+                    cv::Point(human_pose_tensor.get_double("r_eye_x"), human_pose_tensor.get_double("r_eye_y") + 30);
+            }
+
+            cv::putText(mat, std::to_string(human_pose_tensor.get_int("object_id")), id_position,
+                        cv::FONT_HERSHEY_TRIPLEX, 1, cv::Scalar(0, 255, 0), 1);
         }
     }
 }
@@ -206,11 +220,11 @@ gboolean draw_label(GstGvaWatermark *gvawatermark, GstBuffer *buffer) {
             if (pos.y < 0)
                 pos.y = rect.y + 30.f;
             cv::putText(mat, text, pos, cv::FONT_HERSHEY_TRIPLEX, 1, color, 1);
-            // std::string path =
-            //     "/home/pbochenk/projects/diplom/video-samples/gvaskeleton_images_with_cv_clear/frame" +
-            //     std::to_string(index_for_images++) + ".jpg";
-            // cv::imwrite(path, mat);
         }
+        // g_print("%lu \n ", index_for_images);
+        std::string path = "/home/pbochenk/projects/diplom/video-samples/gvaskeleton_images/frame" +
+                           std::to_string(index_for_images++) + ".jpg";
+        cv::imwrite(path, mat);
     } catch (const std::exception &e) {
         GST_ELEMENT_ERROR(gvawatermark, STREAM, FAILED, ("watermark has failed to draw label"),
                           ("%s", CreateNestedErrorMsg(e).c_str()));

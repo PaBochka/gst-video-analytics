@@ -18,20 +18,26 @@
 namespace skeletontracker {
 class Tracker : public ITracker {
   protected:
-    std::vector<std::map<std::string, float>> poses;
+    std::vector<GVA::Tensor> poses;
+    std::vector<int> unique_id_vec;
     int object_id = 0;
     float threshold;
     int frame_width;
     int frame_height;
 
   public:
-    Tracker(int _frame_width, int _frame_height,
-            std::vector<std::map<std::string, float>> _poses = std::vector<std::map<std::string, float>>(),
-            int _object_id = 0, float _threshold = 0.5f);
+    Tracker(int _frame_width, int _frame_height, std::vector<GVA::Tensor> _poses = std::vector<GVA::Tensor>(),
+            std::vector<int> _unique_id_vec = std::vector<int>(), int _object_id = 0, float _threshold = 0.5f);
     ~Tracker() = default;
     void track(GstBuffer *buffer) override;
     static ITracker *Create(const GstVideoInfo *video_info);
-    float Distance(const GVA::Tensor &tensor, const std::map<std::string, float> &pose);
-    void copyTensorsToPoses(const std::vector<GVA::Tensor> &tensors, std::vector<std::map<std::string, float>> &poses);
+    float Distance(const GVA::Tensor &tensor, const GVA::Tensor &pose);
+    float Lans_Will_Distance(const GVA::Tensor &tensor, const GVA::Tensor &pose);
+    void copyTensorsToPoses(const std::vector<GVA::Tensor> &tensors, std::vector<GVA::Tensor> &poses);
+    float CosDistance(cv::Point2f center_tensor, cv::Point2f center_pose);
+    float EuclideanDistance(cv::Point2f center_tensor, cv::Point2f center_pose);
+    cv::Point2f CenterGravity(const GVA::Tensor &tensor);
+    void AppendObject(std::vector<GVA::Tensor> &tensors);
+    void DropObject(const std::vector<GVA::Tensor> &tensors, std::vector<int> &unique_id_vec);
 };
 } // namespace skeletontracker

@@ -27,7 +27,7 @@ class Tracker : public ITracker {
 
   public:
     Tracker(int _frame_width, int _frame_height, std::vector<GVA::Tensor> _poses = std::vector<GVA::Tensor>(),
-            std::vector<int> _unique_id_vec = std::vector<int>(), int _object_id = 0, float _threshold = 0.5f);
+            std::vector<int> _unique_id_vec = std::vector<int>(), int _object_id = 0, float _threshold = 0.25f);
     ~Tracker() = default;
     void track(GstBuffer *buffer) override;
     static ITracker *Create(const GstVideoInfo *video_info);

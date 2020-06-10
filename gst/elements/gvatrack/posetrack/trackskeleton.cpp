@@ -8,9 +8,9 @@
 #include <math.h>
 
 using namespace skeletontracker;
-Tracker::Tracker(int _frame_width, int _frame_height, std::vector<GVA::Tensor> _poses, std::vector<int> _unique_id_vec,
-                 int _object_id, float _threshold)
-    : poses(_poses), unique_id_vec(_unique_id_vec), object_id(_object_id), threshold(_threshold),
+Tracker::Tracker(int _frame_width, int _frame_height, std::vector<GVA::Tensor> _poses,
+                 std::vector<GVA::Tensor> _unfound_tensors, int _object_id, float _threshold)
+    : poses(_poses), unfound_tensors(_unfound_tensors), object_id(_object_id), threshold(_threshold),
       frame_width(_frame_width), frame_height(_frame_height) {
 }
 
@@ -20,13 +20,12 @@ ITracker *Tracker::Create(const GstVideoInfo *video_info) {
 
 void Tracker::track(GstBuffer *buffer) {
     GVA::VideoFrame frame(buffer);
-    // g_print("*\n");
     if (poses.empty()) {
         for (auto &tensor : frame.tensors()) {
             if (tensor.is_human_pose()) {
                 tensor.set_int("object_id", ++object_id);
+                tensor.set_int("time_live", 10);
                 poses.push_back(gst_structure_copy(tensor.gst_structure()));
-                unique_id_vec.push_back(object_id);
             }
         }
     } else {
@@ -34,102 +33,72 @@ void Tracker::track(GstBuffer *buffer) {
         for (auto &tensor : frame.tensors()) {
             if (tensor.is_human_pose())
                 for (auto &pose : poses) {
-                    // matches.insert({CosDistance(CenterGravity(tensor), CenterGravity(pose)), pose});
                     matches.insert({Distance(tensor, pose), pose});
                 }
-            // g_print("#\n");
-            // for (const auto &match : matches) {
-            //     std::cout << "nose_tensor " << std::to_string(tensor.get_double("nose_x")) << " tensor id "
-            //               << std::to_string(match.second.get_int("object_id"))
-            //               << " distance " + std::to_string(match.first) + " nose " +
-            //                      std::to_string(match.second.get_double("nose_x"))
-            //               << std::endl;
-            // }
-            // g_print("#\n");
             if (matches.begin()->first < threshold) {
                 tensor.set_int("object_id", matches.begin()->second.get_int("object_id"));
+                tensor.set_int("time_live", 10);
+
             } else {
                 tensor.set_int("object_id", ++object_id);
+                tensor.set_int("time_live", 10);
             }
-            // unique_id.push_back(tensor.get_int("object_id"));
             matches.clear();
         }
-
-        if (frame.tensors().size() < poses.size()) {
-            DropObject(frame.tensors(), unique_id_vec);
-        } else if (frame.tensors().size() >= poses.size())
-            for (auto &tensor_with_unique_id : frame.tensors()) {
-                int unique_id = 0;
-                for (auto &tensor : frame.tensors()) {
-                    if (tensor_with_unique_id.get_int("object_id") == tensor.get_int("object_id"))
-                        unique_id++;
-                }
-                if (unique_id > 1) {
-                    int new_id = *std::max_element(unique_id_vec.begin(), unique_id_vec.end()) + 1;
-                    tensor_with_unique_id.set_int("object_id", new_id);
-                    unique_id_vec.push_back(new_id);
-                }
-            }
+        RedefinitionObjectsId(frame.tensors());
+        SaveLiveIfObjectsLoss(poses, frame.tensors(), unfound_tensors);
+        RewriteOldObjects(poses, frame.tensors(), unfound_tensors);
     }
-    // std::cout << "vector size " << unique_id_vec.size() << " max id "
-    //           << *std::max_element(unique_id_vec.begin(), unique_id_vec.end()) << std::endl;
-    poses.clear();
-    for (auto &tensor : frame.tensors()) {
-        if (tensor.is_human_pose()) {
-            poses.push_back(gst_structure_copy(tensor.gst_structure()));
-        }
-    }
-    // g_print("*\n");
 }
 
-void Tracker::AppendObject(std::vector<GVA::Tensor> &tensors) {
+void Tracker::RedefinitionObjectsId(std::vector<GVA::Tensor> tensors) {
 
     for (auto &tensor_with_unique_id : tensors) {
-        int un_id = 0;
+        int unique_id = 0;
         for (auto &tensor : tensors) {
             if (tensor_with_unique_id.get_int("object_id") == tensor.get_int("object_id"))
-                un_id++;
+                unique_id++;
         }
-        if (un_id > 1) {
-            int new_id = *std::max_element(unique_id_vec.begin(), unique_id_vec.end()) + 1;
-            tensor_with_unique_id.set_int("object_id", new_id);
-            unique_id_vec.push_back(new_id);
+        if (unique_id > 1) {
+            tensor_with_unique_id.set_int("object_id", ++object_id);
         }
     }
 }
+void Tracker::SaveLiveIfObjectsLoss(std::vector<GVA::Tensor> &_poses, const std::vector<GVA::Tensor> &tensors,
+                                    std::vector<GVA::Tensor> &_unfound_tensors) {
 
-void Tracker::DropObject(const std::vector<GVA::Tensor> &tensors, std::vector<int> &unique_id_vec) {
-    std::vector<int> new_vec_id;
-    for (auto it = unique_id_vec.begin(); it != unique_id_vec.end(); ++it) {
-        int matches_count = 0;
-        for (auto tensor : tensors) {
-            int id = tensor.get_int("object_id");
-            if (id == *it) {
-                matches_count++;
+    for (auto &pose : _poses) {
+        if (pose.is_human_pose()) {
+            int current_id = pose.get_int("object_id");
+            bool is_found = false;
+            for (auto &tensor : tensors) {
+                if (tensor.get_int("object_id") == current_id) {
+                    is_found = true;
+                    break;
+                }
+            }
+            if (!is_found) {
+                int time_live = pose.get_int("time_live");
+                if (time_live == 0)
+                    continue;
+                _unfound_tensors.push_back(pose);
+                pose.set_int("time_live", --time_live);
             }
         }
-        if (matches_count == 0) {
-            *it = -1;
+    }
+}
+
+void Tracker::RewriteOldObjects(std::vector<GVA::Tensor> &_poses, const std::vector<GVA::Tensor> &tensors,
+                                std::vector<GVA::Tensor> &_unfound_tensors) {
+    _poses.clear();
+    for (auto &tensor : tensors) {
+        if (tensor.is_human_pose()) {
+            _poses.push_back(gst_structure_copy(tensor.gst_structure()));
         }
     }
-    std::vector<int>::iterator pend = std::remove(unique_id_vec.begin(), unique_id_vec.end(), -1);
-    for (std::vector<int>::iterator p = unique_id_vec.begin(); p != pend; ++p)
-        new_vec_id.push_back(*p);
-    unique_id_vec.clear();
-    unique_id_vec = new_vec_id;
-}
-
-float Tracker::CosDistance(cv::Point2f center_tensor, cv::Point2f center_pose) {
-    float distance = 1 - ((center_tensor.x * center_pose.x + center_tensor.y * center_pose.y) /
-                          (sqrt(pow(center_tensor.x, 2) + pow(center_tensor.y, 2)) *
-                           sqrt(pow(center_pose.x, 2) + pow(center_pose.y, 2))));
-    return distance;
-}
-
-float Tracker::EuclideanDistance(cv::Point2f center_tensor, cv::Point2f center_pose) {
-    float distance = sqrt(pow((center_tensor.x - center_pose.x) / frame_width, 2) +
-                          pow((center_tensor.y - center_pose.y) / frame_height, 2));
-    return distance;
+    for (auto &unfound_tensor : _unfound_tensors) {
+        _poses.push_back(unfound_tensor);
+    }
 }
 
 float Tracker::Distance(const GVA::Tensor &tensor, const GVA::Tensor &pose) {
@@ -244,136 +213,5 @@ float Tracker::Distance(const GVA::Tensor &tensor, const GVA::Tensor &pose) {
     float distance = (nose + neck + r_shoulder + r_cubit + r_hand + l_shoulder + l_cubit + l_hand + r_hip + r_knee +
                       r_foot + l_hip + l_knee + l_foot + r_eye + l_eye + r_ear + l_ear) /
                      18;
-    return distance;
-}
-
-cv::Point2f Tracker::CenterGravity(const GVA::Tensor &tensor) {
-    float p_head =
-        0.07f; // подбор из наобилее заметных и по количеству точек. еще делится на количество точек на области:5
-    float p_r_hand = 0.05f;   // 2
-    float p_l_hand = 0.05f;   // 2
-    float p_r_foot = 0.0375f; // 2
-    float p_l_foot = 0.0375f; // 2
-    float p_body = 0.06f;     // 5
-    float xc = 0;
-    float yc = 0;
-
-    xc += tensor.get_double("nose_x") > 0 ? tensor.get_double("nose_x") * p_head : 0;
-    xc += tensor.get_double("r_eye_x") > 0 ? tensor.get_double("r_eye_x") * p_head : 0;
-    xc += tensor.get_double("l_eye_x") > 0 ? tensor.get_double("l_eye_x") * p_head : 0;
-    xc += tensor.get_double("r_ear_x") > 0 ? tensor.get_double("r_ear_x") * p_head : 0;
-    xc += tensor.get_double("l_ear_x") > 0 ? tensor.get_double("l_ear_x") * p_head : 0;
-    xc += tensor.get_double("r_cubit_x") > 0 ? tensor.get_double("r_cubit_x") * p_r_hand : 0;
-    xc += tensor.get_double("l_cubit_x") > 0 ? tensor.get_double("l_cubit_x") * p_l_hand : 0;
-    xc += tensor.get_double("r_hand_x") > 0 ? tensor.get_double("r_hand_x") * p_r_hand : 0;
-    xc += tensor.get_double("l_hand_x") > 0 ? tensor.get_double("l_hand_x") * p_l_hand : 0;
-    xc += tensor.get_double("r_knee_x") > 0 ? tensor.get_double("r_knee_x") * p_r_foot : 0;
-    xc += tensor.get_double("l_knee_x") > 0 ? tensor.get_double("l_knee_x") * p_l_foot : 0;
-    xc += tensor.get_double("r_foot_x") > 0 ? tensor.get_double("r_foot_x") * p_r_foot : 0;
-    xc += tensor.get_double("l_foot_x") > 0 ? tensor.get_double("l_foot_x") * p_l_foot : 0;
-    xc += tensor.get_double("neck_x") > 0 ? tensor.get_double("neck_x") * p_body : 0;
-    xc += tensor.get_double("r_shoulder_x") > 0 ? tensor.get_double("r_shoulder_x") * p_body : 0;
-    xc += tensor.get_double("l_shoulder_x") > 0 ? tensor.get_double("l_shoulder_x") * p_body : 0;
-    xc += tensor.get_double("r_hip_x") > 0 ? tensor.get_double("r_hip_x") * p_body : 0;
-    xc += tensor.get_double("l_hip_x") > 0 ? tensor.get_double("l_hip_x") * p_body : 0;
-
-    yc += tensor.get_double("nose_y") > 0 ? tensor.get_double("nose_y") * p_head : 0;
-    yc += tensor.get_double("r_eye_y") > 0 ? tensor.get_double("r_eye_y") * p_head : 0;
-    yc += tensor.get_double("l_eye_y") > 0 ? tensor.get_double("l_eye_y") * p_head : 0;
-    yc += tensor.get_double("r_ear_y") > 0 ? tensor.get_double("r_ear_y") * p_head : 0;
-    yc += tensor.get_double("l_ear_y") > 0 ? tensor.get_double("l_ear_y") * p_head : 0;
-    yc += tensor.get_double("r_cubit_y") > 0 ? tensor.get_double("r_cubit_y") * p_r_hand : 0;
-    yc += tensor.get_double("l_cubit_y") > 0 ? tensor.get_double("l_cubit_y") * p_l_hand : 0;
-    yc += tensor.get_double("r_hand_y") > 0 ? tensor.get_double("r_hand_y") * p_r_hand : 0;
-    yc += tensor.get_double("l_hand_y") > 0 ? tensor.get_double("l_hand_y") * p_l_hand : 0;
-    yc += tensor.get_double("r_knee_y") > 0 ? tensor.get_double("r_knee_y") * p_r_foot : 0;
-    yc += tensor.get_double("l_knee_y") > 0 ? tensor.get_double("l_knee_y") * p_l_foot : 0;
-    yc += tensor.get_double("r_foot_y") > 0 ? tensor.get_double("r_foot_y") * p_r_foot : 0;
-    yc += tensor.get_double("l_foot_y") > 0 ? tensor.get_double("l_foot_y") * p_l_foot : 0;
-    yc += tensor.get_double("neck_y") > 0 ? tensor.get_double("neck_y") * p_body : 0;
-    yc += tensor.get_double("r_shoulder_y") > 0 ? tensor.get_double("r_shoulder_y") * p_body : 0;
-    yc += tensor.get_double("l_shoulder_y") > 0 ? tensor.get_double("l_shoulder_y") * p_body : 0;
-    yc += tensor.get_double("r_hip_y") > 0 ? tensor.get_double("r_hip_y") * p_body : 0;
-    yc += tensor.get_double("l_hip_y") > 0 ? tensor.get_double("l_hip_y") * p_body : 0;
-    return cv::Point2f(xc, yc);
-}
-
-float Tracker::Lans_Will_Distance(const GVA::Tensor &tensor, const GVA::Tensor &pose) {
-
-    float nose = (abs(tensor.get_double("nose_x") - pose.get_double("nose_x")) +
-                  abs(tensor.get_double("nose_y") - pose.get_double("nose_y"))) /
-                 (tensor.get_double("nose_x") + pose.get_double("nose_x") + tensor.get_double("nose_y") +
-                  pose.get_double("nose_y"));
-    float neck = (abs(tensor.get_double("neck_x") - pose.get_double("neck_x")) +
-                  abs(tensor.get_double("neck_y") - pose.get_double("neck_y"))) /
-                 (tensor.get_double("neck_x") + pose.get_double("neck_x") + tensor.get_double("neck_y") +
-                  pose.get_double("neck_y"));
-    float r_shoulder = (abs(tensor.get_double("r_shoulder_x") - pose.get_double("r_shoulder_x")) +
-                        abs(tensor.get_double("r_shoulder_y") - pose.get_double("r_shoulder_y"))) /
-                       (tensor.get_double("r_shoulder_x") + pose.get_double("r_shoulder_x") +
-                        tensor.get_double("r_shoulder_y") + pose.get_double("r_shoulder_y"));
-    float r_cubit = (abs(tensor.get_double("r_cubit_x") - pose.get_double("r_cubit_x")) +
-                     abs(tensor.get_double("r_cubit_y") - pose.get_double("r_cubit_y"))) /
-                    (tensor.get_double("r_cubit_x") + pose.get_double("r_cubit_x") + tensor.get_double("r_cubit_y") +
-                     pose.get_double("r_cubit_y"));
-    float r_hand = (abs(tensor.get_double("r_hand_x") - pose.get_double("r_hand_x")) +
-                    abs(tensor.get_double("r_hand_y") - pose.get_double("r_hand_y"))) /
-                   (tensor.get_double("r_hand_x") + pose.get_double("r_hand_x") + tensor.get_double("r_hand_y") +
-                    pose.get_double("r_hand_y"));
-    float l_shoulder = (abs(tensor.get_double("l_shoulder_x") - pose.get_double("l_shoulder_x")) +
-                        abs(tensor.get_double("l_shoulder_y") - pose.get_double("l_shoulder_y"))) /
-                       (tensor.get_double("l_shoulder_x") + pose.get_double("l_shoulder_x") +
-                        tensor.get_double("l_shoulder_y") + pose.get_double("l_shoulder_y"));
-    float l_cubit = (abs(tensor.get_double("l_cubit_x") - pose.get_double("l_cubit_x")) +
-                     abs(tensor.get_double("l_cubit_y") - pose.get_double("l_cubit_y"))) /
-                    (tensor.get_double("l_cubit_x") + pose.get_double("l_cubit_x") + tensor.get_double("l_cubit_y") +
-                     pose.get_double("l_cubit_y"));
-    float l_hand = (abs(tensor.get_double("l_hand_x") - pose.get_double("l_hand_x")) +
-                    abs(tensor.get_double("l_hand_y") - pose.get_double("l_hand_y"))) /
-                   (tensor.get_double("l_hand_x") + pose.get_double("l_hand_x") + tensor.get_double("l_hand_y") +
-                    pose.get_double("l_hand_y"));
-    float r_hip = (abs(tensor.get_double("r_hip_x") - pose.get_double("r_hip_x")) +
-                   abs(tensor.get_double("r_hip_y") - pose.get_double("r_hip_y"))) /
-                  (tensor.get_double("r_hip_x") + pose.get_double("r_hip_x") + tensor.get_double("r_hip_y") +
-                   pose.get_double("r_hip_y"));
-    float r_knee = (abs(tensor.get_double("r_knee_x") - pose.get_double("r_knee_x")) +
-                    abs(tensor.get_double("r_knee_y") - pose.get_double("r_knee_y"))) /
-                   (tensor.get_double("r_knee_x") + pose.get_double("r_knee_x") + tensor.get_double("r_knee_y") +
-                    pose.get_double("r_knee_y"));
-    float r_foot = (abs(tensor.get_double("r_foot_x") - pose.get_double("r_foot_x")) +
-                    abs(tensor.get_double("r_foot_y") - pose.get_double("r_foot_y"))) /
-                   (tensor.get_double("r_foot_x") + pose.get_double("r_foot_x") + tensor.get_double("r_foot_y") +
-                    pose.get_double("r_foot_y"));
-    float l_hip = (abs(tensor.get_double("l_hip_x") - pose.get_double("l_hip_x")) +
-                   abs(tensor.get_double("l_hip_y") - pose.get_double("l_hip_y"))) /
-                  (tensor.get_double("l_hip_x") + pose.get_double("l_hip_x") + tensor.get_double("l_hip_y") +
-                   pose.get_double("l_hip_y"));
-    float l_knee = (abs(tensor.get_double("l_knee_x") - pose.get_double("l_knee_x")) +
-                    abs(tensor.get_double("l_knee_y") - pose.get_double("l_knee_y"))) /
-                   (tensor.get_double("l_knee_x") + pose.get_double("l_knee_x") + tensor.get_double("l_knee_y") +
-                    pose.get_double("l_knee_y"));
-    float l_foot = (abs(tensor.get_double("l_foot_x") - pose.get_double("l_foot_x")) +
-                    abs(tensor.get_double("l_foot_y") - pose.get_double("l_foot_y"))) /
-                   (tensor.get_double("l_foot_x") + pose.get_double("l_foot_x") + tensor.get_double("l_foot_y") +
-                    pose.get_double("l_foot_y"));
-    float r_eye = (abs(tensor.get_double("r_eye_x") - pose.get_double("r_eye_x")) +
-                   abs(tensor.get_double("r_eye_y") - pose.get_double("r_eye_y"))) /
-                  (tensor.get_double("r_eye_x") + pose.get_double("r_eye_x") + tensor.get_double("r_eye_y") +
-                   pose.get_double("r_eye_y"));
-    float l_eye = (abs(tensor.get_double("l_eye_x") - pose.get_double("l_eye_x")) +
-                   abs(tensor.get_double("l_eye_y") - pose.get_double("l_eye_y"))) /
-                  (tensor.get_double("l_eye_x") + pose.get_double("l_eye_x") + tensor.get_double("l_eye_y") +
-                   pose.get_double("l_eye_y"));
-    float r_ear = (abs(tensor.get_double("r_ear_x") - pose.get_double("r_ear_x")) +
-                   abs(tensor.get_double("r_ear_y") - pose.get_double("r_ear_y"))) /
-                  (tensor.get_double("r_ear_x") + pose.get_double("r_ear_x") + tensor.get_double("r_ear_y") +
-                   pose.get_double("r_ear_y"));
-    float l_ear = (abs(tensor.get_double("l_ear_x") - pose.get_double("l_ear_x")) +
-                   abs(tensor.get_double("l_ear_y") - pose.get_double("l_ear_y"))) /
-                  (tensor.get_double("l_ear_x") + pose.get_double("l_ear_x") + tensor.get_double("l_ear_y") +
-                   pose.get_double("l_ear_y"));
-
-    float distance = (nose + neck + r_shoulder + r_cubit + r_hand + l_shoulder + l_cubit + l_hand + r_hip + r_knee +
-                      r_foot + l_hip + l_knee + l_foot + r_eye + l_eye + r_ear + l_ear);
     return distance;
 }

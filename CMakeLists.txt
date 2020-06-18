@@ -117,6 +117,7 @@ option(SUPPORT_DMA_BUFFER "Parameter to enable DMABuf in sink/source caps" OFF)
 option(ENABLE_PAHO_INSTALLATION "Enables paho-mqtt3c installation" OFF)
 option(ENABLE_RDKAFKA_INSTALLATION "Enables rdkafka installation" OFF)
 option(ENABLE_VAS_TRACKER "Enables vas tracker as part of gvatrack" ON)
+option(ENABLE_POSE_TRACKER "Enables pose tracker type as part of gvatrack" ON)
 option(ENABLE_TRACKER_TYPE_IOU "Enables iou tracker type as part of gvatrack" OFF)
 option(USE_VPUSMM "Parameter to use VPUSMM" OFF)
 
